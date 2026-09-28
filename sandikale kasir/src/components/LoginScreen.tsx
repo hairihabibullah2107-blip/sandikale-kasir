@@ -4,6 +4,12 @@ import { supabase } from '../lib/supabase';
 import { SandikaleLogo } from './SandikaleLogo';
 import { Lock, LogIn, AlertCircle } from 'lucide-react';
 
+const AUTH_EMAILS: Record<string, string> = {
+  admin: 'admin@sandikale.com',
+  kasir: 'kasir@sandikale.com',
+  produksi: 'produksi@sandikale.com',
+};
+
 export const LoginScreen: React.FC = () => {
   const { users, setCurrentUser, showToast } = useApp();
   const [selectedUsername, setSelectedUsername] = useState<string>(
@@ -26,7 +32,13 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
 
     const signIn = async () => {
-      const email = `${targetUser.username}@sandikale.local`;
+      const email = AUTH_EMAILS[targetUser.username] || targetUser.email;
+      if (!email) {
+        setErrorMsg('Email akun cloud untuk pengguna ini belum dikonfigurasi.');
+        setIsLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password: pin
@@ -69,14 +81,11 @@ export const LoginScreen: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950">
-      {/* Background Graphic Pattern */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5">
         <SandikaleLogo variant="watermark" />
       </div>
 
       <div className="relative bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 sm:p-8 shadow-2xl space-y-6 animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* Brand Lockup: Name Only */}
         <div className="text-center space-y-1.5 pt-2">
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wider font-['Plus_Jakarta_Sans']">
             SANDIKALE<span className="text-red-500">-PROJECT</span>
@@ -86,7 +95,6 @@ export const LoginScreen: React.FC = () => {
           </p>
         </div>
 
-        {/* Error Alert */}
         {errorMsg && (
           <div className="p-3 rounded-xl bg-red-950/50 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
