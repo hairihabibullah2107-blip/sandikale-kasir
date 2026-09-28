@@ -1,0 +1,6 @@
+{
+  "name": "SANDIKALE POS - Sistem Kasir & Inventaris Sablon",
+  "description": "Sistem kasir profesional SANDIKALE-PROJECT dengan manajemen stok otomatis, pembayaran digital QRIS & bank, cetak struk bluetooth, analitik real-time, dan mode offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
