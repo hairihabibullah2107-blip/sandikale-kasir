@@ -274,6 +274,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
   }, [offlineQueue]);
 
+  // Restore only a valid Supabase session on refresh.
+  // A new device has no session and therefore remains on the login screen.
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled || !data.session) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, username, name, role')
+        .eq('id', data.session.user.id)
+        .single();
+
+      if (!cancelled && profile) {
+        setCurrentUser({
+          id: profile.id,
+          username: profile.username || '',
+          name: profile.name || '',
+          role: profile.role,
+          pin: ''
+        });
+      }
+    };
+
+    void restoreSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' && !cancelled) {
+        setCurrentUser(null);
+      }
+      if (event === 'SIGNED_IN' && session && !cancelled) {
+        void supabase
+          .from('profiles')
+          .select('id, username, name, role')
+          .eq('id', session.user.id)
+          .single()
+          .then(({ data: profile }) => {
+            if (!cancelled && profile) {
+              setCurrentUser({
+                id: profile.id,
+                username: profile.username || '',
+                name: profile.name || '',
+                role: profile.role,
+                pin: ''
+              });
+            }
+          });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
   // Supabase session + realtime product synchronization.
   useEffect(() => {
     let cancelled = false;
