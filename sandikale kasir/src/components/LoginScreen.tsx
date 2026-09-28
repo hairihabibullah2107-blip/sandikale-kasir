@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { supabase } from '../lib/supabase';
 import { SandikaleLogo } from './SandikaleLogo';
 import { Lock, LogIn, AlertCircle } from 'lucide-react';
 
@@ -24,17 +25,46 @@ export const LoginScreen: React.FC = () => {
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      if (targetUser.pin !== pin) {
-        setErrorMsg('PIN / Kata Sandi yang dimasukkan salah!');
+    const signIn = async () => {
+      const email = `${targetUser.username}@sandikale.local`;
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: pin
+      });
+
+      if (error || !data.user) {
+        console.error('[SANDIKALE] Login failed:', error);
+        setErrorMsg('PIN / Kata Sandi yang dimasukkan salah atau akun cloud belum dibuat.');
         setIsLoading(false);
         return;
       }
 
-      setCurrentUser(targetUser);
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, username, name, role')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        console.error('[SANDIKALE] Profile load failed:', profileError);
+        await supabase.auth.signOut();
+        setErrorMsg('Profil pengguna belum tersedia di database cloud.');
+        setIsLoading(false);
+        return;
+      }
+
+      setCurrentUser({
+        id: profile.id,
+        username: profile.username || targetUser.username,
+        name: profile.name || targetUser.name,
+        role: profile.role,
+        pin: ''
+      });
       setIsLoading(false);
-      showToast(`Selamat datang kembali, ${targetUser.name}!`, 'success');
-    }, 400);
+      showToast(`Selamat datang kembali, ${profile.name || targetUser.name}!`, 'success');
+    };
+
+    void signIn();
   };
 
   return (
