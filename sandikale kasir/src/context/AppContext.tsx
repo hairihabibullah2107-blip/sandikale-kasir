@@ -285,16 +285,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      let session = (await supabase.auth.getSession()).data.session;
+      const session = (await supabase.auth.getSession()).data.session;
 
+      // Cloud data is available only after a real Supabase Auth login.
       if (!session) {
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (error || !data.session) {
-          console.error('[SANDIKALE] Supabase Auth unavailable:', error);
-          showToast('Cloud belum tersambung. Aktifkan Anonymous Sign-ins di Supabase.', 'error');
-          return;
-        }
-        session = data.session;
+        setCloudReady(false);
+        return;
       }
 
       if (cancelled) return;
