@@ -1,0 +1,7 @@
+{
+  "build": {
+    "command": "npm run build",
+    "cwd": "sandikale kasir",
+    "directory": "sandikale kasir/dist"
+  }
+}
