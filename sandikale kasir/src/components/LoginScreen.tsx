@@ -12,8 +12,10 @@ const AUTH_EMAILS: Record<string, string> = {
 
 export const LoginScreen: React.FC = () => {
   const { users, setCurrentUser, showToast } = useApp();
-  const [selectedUsername, setSelectedUsername] = useState<string>(
-    users[0]?.username || ''
+  // Login memilih akun yang sudah dibuat di sistem oleh Admin/Owner.
+  // Username tidak pernah ditampilkan atau diminta dari pengguna.
+  const [selectedUserId, setSelectedUserId] = useState<string>(
+    users[0]?.id || ''
   );
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -23,9 +25,9 @@ export const LoginScreen: React.FC = () => {
     e.preventDefault();
     setErrorMsg('');
 
-    const targetUser = users.find(u => u.username === selectedUsername);
+    const targetUser = users.find(u => u.id === selectedUserId);
     if (!targetUser) {
-      setErrorMsg('Pengguna tidak ditemukan dalam sistem!');
+      setErrorMsg('Pilih akun pengguna terlebih dahulu.');
       return;
     }
 
@@ -105,19 +107,26 @@ export const LoginScreen: React.FC = () => {
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Pilih Pengguna Sistem
+              Pilih Akun Pengguna
             </label>
             <select
-              value={selectedUsername}
-              onChange={e => setSelectedUsername(e.target.value)}
+              value={selectedUserId}
+              onChange={e => setSelectedUserId(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-red-500 transition"
             >
-              {users.map(u => (
-                <option key={u.id} value={u.username}>
-                  {u.name} ({u.role.toUpperCase()})
-                </option>
-              ))}
+              {users.length === 0 ? (
+                <option value="">Belum ada pengguna</option>
+              ) : (
+                users.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} — {u.role === 'admin' ? 'ADMIN / OWNER' : u.role.toUpperCase()}
+                  </option>
+                ))
+              )}
             </select>
+            <p className="mt-1.5 text-[10px] text-slate-500">
+              Pilih nama akun yang dibuat oleh Admin / Owner, lalu masukkan PIN.
+            </p>
           </div>
 
           <div>
