@@ -20,6 +20,7 @@ import {
 import { bluetoothPrinter, BluetoothDeviceState } from '../utils/bluetoothPrinter';
 import { generateSha256Checksum, encryptSensitiveData } from '../utils/crypto';
 import { getTranslation } from '../utils/i18n';
+import { supabase } from '../lib/supabase';
 
 interface AppContextType {
   currentUser: User | null;
@@ -88,22 +89,8 @@ const STORAGE_KEYS = {
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Load initial from localStorage or defaults
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.USER);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.username === 'admin' || parsed.role === 'admin') {
-          parsed.name = 'HAIRI (owner )';
-          parsed.pin = 'hairi21';
-        }
-        return parsed;
-      } catch {
-        return INITIAL_USERS[0];
-      }
-    }
-    return INITIAL_USERS[0]; // Default logged in as Owner for convenience
-  });
+  // A fresh browser/device must never be logged in automatically.
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.USERS);
@@ -174,8 +161,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<Order | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
 
   const t = getTranslation(language);
+  const STORE_ID = 'sandikale';
+
+  const productFromDb = (row: any): Product => ({
+    id: row.id,
+    sku: row.sku,
+    name: row.name,
+    category: row.category,
+    price: Number(row.price || 0),
+    costPrice: Number(row.cost_price || 0),
+    stock: Number(row.stock || 0),
+    minStock: Number(row.min_stock || 0),
+    image: row.image || '',
+    unit: row.unit || 'pcs',
+    isRawMaterial: Boolean(row.is_raw_material),
+    notes: row.notes || undefined
+  });
+
+  const productToDb = (product: Product) => ({
+    id: product.id,
+    store_id: STORE_ID,
+    sku: product.sku,
+    name: product.name,
+    category: product.category,
+    price: product.price,
+    cost_price: product.costPrice,
+    stock: product.stock,
+    min_stock: product.minStock,
+    image: product.image || null,
+    unit: product.unit || 'pcs',
+    is_raw_material: Boolean(product.isRawMaterial),
+    notes: product.notes || null,
+    updated_at: new Date().toISOString()
+  });
+
+  const loadProductsFromCloud = async () => {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('store_id', STORE_ID)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('[SANDIKALE] Product cloud load failed:', error);
+      return false;
+    }
+
+    if (data && data.length > 0) {
+      setProducts(data.map(productFromDb));
+    } else {
+      const { error: seedError } = await supabase
+        .from('products')
+        .upsert(products.map(productToDb), { onConflict: 'id' });
+
+      if (seedError) {
+        console.error('[SANDIKALE] Product cloud seed failed:', seedError);
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const syncProductsToCloud = async (items: Product[]) => {
+    if (!cloudReady || items.length === 0) return;
+    const { error } = await supabase
+      .from('products')
+      .upsert(items.map(productToDb), { onConflict: 'id' });
+
+    if (error) {
+      console.error('[SANDIKALE] Product cloud sync failed:', error);
+    }
+  };
 
   // Sync state to LocalStorage
   useEffect(() => {
@@ -213,6 +273,83 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
   }, [offlineQueue]);
+
+  // Supabase session + realtime product synchronization.
+  useEffect(() => {
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const connectCloud = async () => {
+      if (!currentUser) {
+        setCloudReady(false);
+        return;
+      }
+
+      let session = (await supabase.auth.getSession()).data.session;
+
+      if (!session) {
+        const { data, error } = await supabase.auth.signInAnonymously();
+        if (error || !data.session) {
+          console.error('[SANDIKALE] Supabase Auth unavailable:', error);
+          showToast('Cloud belum tersambung. Aktifkan Anonymous Sign-ins di Supabase.', 'error');
+          return;
+        }
+        session = data.session;
+      }
+
+      if (cancelled) return;
+
+      const loaded = await loadProductsFromCloud();
+      if (cancelled) return;
+      setCloudReady(loaded);
+
+      if (!loaded) return;
+
+      channel = supabase
+        .channel('sandikale-products-sync')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'products',
+            filter: 'store_id=eq.sandikale'
+          },
+          async () => {
+            const { data } = await supabase
+              .from('products')
+              .select('*')
+              .eq('store_id', STORE_ID)
+              .order('updated_at', { ascending: false });
+
+            if (!cancelled && data) {
+              const next = data.map(productFromDb);
+              setProducts(prev =>
+                JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+              );
+            }
+          }
+        )
+        .subscribe();
+    };
+
+    void connectCloud();
+
+    return () => {
+      cancelled = true;
+      setCloudReady(false);
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
+
+  // Push product changes made on this device to the shared database.
+  useEffect(() => {
+    if (!cloudReady) return;
+    const timer = window.setTimeout(() => {
+      void syncProductsToCloud(products);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [products, cloudReady]);
 
   // Online / Offline Detection
   useEffect(() => {
@@ -747,11 +884,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Koneksi printer Bluetooth diputus', 'info');
   };
 
+  const handleSetCurrentUser = (user: User | null) => {
+    setCurrentUser(user);
+    if (!user) {
+      void supabase.auth.signOut();
+      setCloudReady(false);
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
         currentUser,
-        setCurrentUser,
+        setCurrentUser: handleSetCurrentUser,
         users,
         addUser,
         deleteUser,
