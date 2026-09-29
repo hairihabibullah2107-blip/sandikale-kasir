@@ -20,14 +20,15 @@ import {
 import { bluetoothPrinter, BluetoothDeviceState } from '../utils/bluetoothPrinter';
 import { generateSha256Checksum, encryptSensitiveData } from '../utils/crypto';
 import { getTranslation } from '../utils/i18n';
-import { supabase } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+import { supabase, supabaseUrl, supabasePublishableKey } from '../lib/supabase';
 
 interface AppContextType {
   currentUser: User | null;
   setCurrentUser: (user: User | null) => void;
   users: User[];
-  addUser: (user: Omit<User, 'id'>) => void;
-  deleteUser: (id: string) => void;
+  addUser: (user: Omit<User, 'id'>) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
 
   products: Product[];
   addProduct: (product: Omit<Product, 'id'>) => void;
@@ -198,6 +199,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updated_at: new Date().toISOString()
   });
 
+  const userFromDb = (row: any): User => ({
+    id: row.id,
+    username: row.username || '',
+    name: row.name || '',
+    role: row.role,
+    pin: ''
+  });
+
+  const loadUsersFromCloud = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, username, name, role, is_active, store_id')
+      .eq('store_id', STORE_ID)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('[SANDIKALE] User cloud load failed:', error);
+      return false;
+    }
+
+    setUsers((data || []).map(userFromDb));
+    return true;
+  };
+
   const loadProductsFromCloud = async () => {
     const { data, error } = await supabase
       .from('products')
@@ -247,10 +273,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
   }, [products]);
 
@@ -273,6 +295,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.OFFLINE_QUEUE, JSON.stringify(offlineQueue));
   }, [offlineQueue]);
+
+  // Load the active user list from Supabase so every device sees the same accounts.
+  useEffect(() => {
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const load = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, name, role, is_active, store_id')
+        .eq('store_id', STORE_ID)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+
+      if (!cancelled && !error && data) {
+        setUsers(data.map(userFromDb));
+      }
+    };
+
+    void load();
+
+    channel = supabase
+      .channel('sandikale-users-sync')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: 'store_id=eq.sandikale'
+        },
+        () => {
+          void load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Restore only a valid Supabase session on refresh.
   // A new device has no session and therefore remains on the login screen.
@@ -906,22 +970,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast(`Berhasil menambah stok +${qty}`, 'success');
   };
 
-  const addUser = (userData: Omit<User, 'id'>) => {
-    const newUser: User = {
-      ...userData,
-      id: `u-${Date.now()}`
-    };
-    setUsers(prev => [...prev, newUser]);
-    showToast(`Pengguna "${userData.name}" berhasil dibuat`, 'success');
-  };
-
-  const deleteUser = (id: string) => {
-    if (id === 'u-1') {
-      showToast('Admin utama tidak dapat dihapus!', 'error');
+  const addUser = async (userData: Omit<User, 'id'>) => {
+    if (currentUser?.role !== 'admin') {
+      showToast('Akses ditolak: Hanya Admin / Owner yang dapat membuat pengguna.', 'error');
       return;
     }
-    setUsers(prev => prev.filter(u => u.id !== id));
-    showToast('Pengguna dihapus', 'info');
+
+    const username = userData.username.trim().toLowerCase();
+    const email = username.includes('@') ? username : `${username}@sandikale.com`;
+    const isolatedAuthClient = createClient(supabaseUrl, supabasePublishableKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+      }
+    });
+
+    const { data, error } = await isolatedAuthClient.auth.signUp({
+      email,
+      password: userData.pin || '1234',
+      options: {
+        data: {
+          full_name: userData.name,
+          username,
+          role: userData.role,
+          store_id: STORE_ID
+        }
+      }
+    });
+
+    if (error) {
+      showToast(`Gagal membuat pengguna: ${error.message}`, 'error');
+      return;
+    }
+
+    if (!data.user) {
+      showToast('Akun tidak berhasil dibuat.', 'error');
+      return;
+    }
+
+    // The database trigger creates the profile from the metadata above.
+    await loadUsersFromCloud();
+
+    if (!data.session) {
+      showToast('Akun dibuat, tetapi konfirmasi email masih aktif di Supabase. Matikan "Confirm email" agar akun bisa langsung login dengan PIN.', 'info');
+    } else {
+      showToast(`Pengguna "${userData.name}" berhasil dibuat dan tersimpan di cloud.`, 'success');
+    }
+
+    await isolatedAuthClient.auth.signOut();
+  };
+
+  const deleteUser = async (id: string) => {
+    if (currentUser?.role !== 'admin') {
+      showToast('Akses ditolak: Hanya Admin / Owner yang dapat menghapus pengguna.', 'error');
+      return;
+    }
+
+    if (id === currentUser.id) {
+      showToast('Admin yang sedang login tidak dapat dinonaktifkan.', 'error');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_active: false })
+      .eq('id', id)
+      .eq('store_id', STORE_ID);
+
+    if (error) {
+      showToast(`Gagal menonaktifkan pengguna: ${error.message}`, 'error');
+      return;
+    }
+
+    await loadUsersFromCloud();
+    showToast('Pengguna dinonaktifkan dan tidak lagi muncul di layar login.', 'info');
   };
 
   const updateSettings = (newSettings: Partial<StoreSettings>) => {
