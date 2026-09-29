@@ -71,6 +71,17 @@ export const LoginScreen: React.FC = () => {
         role: profile.role,
         pin: ''
       });
+
+      // Keep Auth metadata aligned with the canonical profile shown by SANDIKALE.
+      if (profile.role === 'admin') {
+        const { error: syncError } = await supabase.functions.invoke('manage-users', {
+          body: { action: 'sync_existing' }
+        });
+        if (syncError) {
+          console.warn('[SANDIKALE] Existing user metadata sync failed:', syncError);
+        }
+      }
+
       setIsLoading(false);
       showToast(`Selamat datang kembali, ${profile.name || targetUser.name}!`, 'success');
     };
