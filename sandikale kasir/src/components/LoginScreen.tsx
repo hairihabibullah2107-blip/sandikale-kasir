@@ -16,89 +16,78 @@ export const LoginScreen: React.FC = () => {
     e.preventDefault();
     setErrorMsg('');
 
-    const enteredName = username.trim();
-    if (!enteredName) {
-      setErrorMsg('Nama pengguna wajib diisi.');
+    const identity = username.trim();
+    if (!identity) {
+      setErrorMsg('Nama pengguna atau email wajib diisi.');
+      return;
+    }
+
+    if (!pin) {
+      setErrorMsg('Kata sandi / PIN wajib diisi.');
       return;
     }
 
     setIsLoading(true);
 
     const signIn = async () => {
-      // Cari akun berdasarkan nama yang ditulis pengguna, lalu gunakan
-      // username internal sebagai identitas Auth. Nama tetap yang terlihat di form.
-      const { data: matchedProfiles, error: lookupError } = await supabase
-        .from('profiles')
-        .select('id, username, name, role, is_active')
-        .ilike('name', enteredName)
-        .eq('store_id', 'sandikale')
-        .eq('is_active', true)
-        .limit(2);
+      // Login langsung ke Supabase Auth. Tidak lagi melakukan query profiles
+      // sebelum autentikasi, sehingga RLS/anon tidak dapat memblokir login.
+      // Input dapat berupa email Auth atau username internal.
+      const candidates = identity.includes('@')
+        ? [identity.toLowerCase()]
+        : [
+            identity.toLowerCase(),
+            `${identity.toLowerCase().replace(/\\s+/g, '')}@sandikale.com`,
+          ];
 
-      if (lookupError || !matchedProfiles || matchedProfiles.length === 0) {
-        console.error('[SANDIKALE] User lookup failed:', lookupError);
-        setErrorMsg('Nama pengguna tidak ditemukan. Gunakan nama yang terdaftar di sistem.');
+      let lastError: any = null;
+      let sessionUser: any = null;
+
+      for (const email of candidates) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: pin,
+        });
+        if (!error && data.user) {
+          sessionUser = data.user;
+          break;
+        }
+        lastError = error;
+      }
+
+      if (!sessionUser) {
+        console.error('[SANDIKALE] Login failed:', lastError);
+        setErrorMsg('Nama pengguna/email atau kata sandi salah.');
         setIsLoading(false);
         return;
       }
 
-      if (matchedProfiles.length > 1) {
-        setErrorMsg('Nama pengguna ganda. Admin perlu membedakan nama akun terlebih dahulu.');
-        setIsLoading(false);
-        return;
-      }
-
-      const targetUser = matchedProfiles[0];
-      const email = targetUser.username.includes('@')
-        ? targetUser.username.trim().toLowerCase()
-        : `${targetUser.username.trim().toLowerCase()}@sandikale.com`;
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: pin
-      });
-
-      if (error || !data.user) {
-        console.error('[SANDIKALE] Login failed:', error);
-        setErrorMsg('Nama pengguna atau kata sandi salah.');
-        setIsLoading(false);
-        return;
-      }
-
+      // Setelah Auth berhasil, profiles dapat dibaca menggunakan sesi
+      // authenticated dan tidak lagi bergantung pada akses anon.
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('id, username, name, role, is_active')
-        .eq('id', data.user.id)
+        .eq('id', sessionUser.id)
         .single();
 
       if (profileError || !profile || profile.is_active === false) {
         console.error('[SANDIKALE] Profile load failed:', profileError);
         await supabase.auth.signOut();
-        setErrorMsg('Akun pengguna tidak aktif atau profil cloud belum tersedia.');
+        setErrorMsg('Login berhasil, tetapi profil Admin belum tersedia di sistem.');
         setIsLoading(false);
         return;
       }
 
       setCurrentUser({
         id: profile.id,
-        username: profile.username || targetUser.username,
-        name: profile.name || targetUser.name,
+        username: profile.username || sessionUser.email || identity,
+        name: profile.name || identity,
         role: profile.role,
         pin: ''
       });
 
-      // Keep Auth metadata aligned with the canonical profile shown by SANDIKALE.
-      if (profile.role === 'admin') {
-        const { error: syncError } = await supabase.functions.invoke('manage-users', {
-          body: { action: 'sync_existing' }
-        });
-        if (syncError) {
-          console.warn('[SANDIKALE] Existing user metadata sync failed:', syncError);
-        }
-      }
-
       setIsLoading(false);
-      showToast(`Selamat datang kembali, ${profile.name || targetUser.name}!`, 'success');
+      showToast(`Selamat datang kembali, ${profile.name || identity}!`, 'success');
     };
 
     void signIn();
