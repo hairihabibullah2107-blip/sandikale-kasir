@@ -5,35 +5,50 @@ import { SandikaleLogo } from './SandikaleLogo';
 import { Lock, LogIn, AlertCircle } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
-  const { users, setCurrentUser, showToast } = useApp();
-  // Login memilih akun yang sudah dibuat di sistem oleh Admin/Owner.
-  // Username tidak pernah ditampilkan atau diminta dari pengguna.
-  const [selectedUserId, setSelectedUserId] = useState<string>(
-    users[0]?.id || ''
-  );
+  const { setCurrentUser, showToast } = useApp();
+  // Login menggunakan nama pengguna yang terdaftar di profiles.
+  const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!users.some(u => u.id === selectedUserId)) {
-      setSelectedUserId(users[0]?.id || '');
-    }
-  }, [users, selectedUserId]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    const targetUser = users.find(u => u.id === selectedUserId);
-    if (!targetUser) {
-      setErrorMsg('Pilih akun pengguna terlebih dahulu.');
+    const enteredName = username.trim();
+    if (!enteredName) {
+      setErrorMsg('Nama pengguna wajib diisi.');
       return;
     }
 
     setIsLoading(true);
 
     const signIn = async () => {
+      // Cari akun berdasarkan nama yang ditulis pengguna, lalu gunakan
+      // username internal sebagai identitas Auth. Nama tetap yang terlihat di form.
+      const { data: matchedProfiles, error: lookupError } = await supabase
+        .from('profiles')
+        .select('id, username, name, role, is_active')
+        .ilike('name', enteredName)
+        .eq('store_id', 'sandikale')
+        .eq('is_active', true)
+        .limit(2);
+
+      if (lookupError || !matchedProfiles || matchedProfiles.length === 0) {
+        console.error('[SANDIKALE] User lookup failed:', lookupError);
+        setErrorMsg('Nama pengguna tidak ditemukan. Gunakan nama yang terdaftar di sistem.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (matchedProfiles.length > 1) {
+        setErrorMsg('Nama pengguna ganda. Admin perlu membedakan nama akun terlebih dahulu.');
+        setIsLoading(false);
+        return;
+      }
+
+      const targetUser = matchedProfiles[0];
       const email = targetUser.username.includes('@')
         ? targetUser.username.trim().toLowerCase()
         : `${targetUser.username.trim().toLowerCase()}@sandikale.com`;
@@ -45,7 +60,7 @@ export const LoginScreen: React.FC = () => {
 
       if (error || !data.user) {
         console.error('[SANDIKALE] Login failed:', error);
-        setErrorMsg('PIN / Kata Sandi yang dimasukkan salah atau akun cloud belum dibuat.');
+        setErrorMsg('Nama pengguna atau kata sandi salah.');
         setIsLoading(false);
         return;
       }
@@ -115,37 +130,31 @@ export const LoginScreen: React.FC = () => {
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Pilih Akun Pengguna
+              Nama Pengguna
             </label>
-            <select
-              value={selectedUserId}
-              onChange={e => setSelectedUserId(e.target.value)}
+            <input
+              type="text"
+              required
+              autoComplete="username"
+              placeholder="Masukkan nama pengguna"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white focus:outline-none focus:border-red-500 transition"
-            >
-              {users.length === 0 ? (
-                <option value="">Belum ada pengguna</option>
-              ) : (
-                users.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} — {u.role === 'admin' ? 'ADMIN / OWNER' : u.role.toUpperCase()}
-                  </option>
-                ))
-              )}
-            </select>
+            />
             <p className="mt-1.5 text-[10px] text-slate-500">
-              Pilih nama akun yang dibuat oleh Admin / Owner, lalu masukkan PIN.
+              Tulis nama pengguna yang dibuat oleh Admin / Owner.
             </p>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              PIN / Password Akses
+              Kata Sandi / PIN
             </label>
             <div className="relative">
               <input
                 type="password"
                 required
-                placeholder="Masukkan PIN / Kata Sandi"
+                placeholder="Masukkan kata sandi / PIN"
                 value={pin}
                 onChange={e => setPin(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white font-mono focus:outline-none focus:border-red-500 transition"
