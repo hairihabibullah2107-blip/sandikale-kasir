@@ -50,7 +50,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // New User Form State
   const [newUserName, setNewUserName] = useState('');
-  const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('kasir');
   const [newUserPin, setNewUserPin] = useState('1234');
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
@@ -72,21 +71,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     showToast('Identitas toko berhasil diperbarui', 'success');
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserName.trim() || !newUserUsername.trim()) {
-      showToast('Nama dan username wajib diisi!', 'error');
+    if (!newUserName.trim()) {
+      showToast('Nama pengguna wajib diisi!', 'error');
       return;
     }
-    addUser({
+
+    // Username hanya identitas internal untuk Supabase Auth.
+    // Tidak ditampilkan dan tidak perlu diingat oleh pengguna.
+    const baseUsername = newUserName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 20) || 'user';
+    const username = `${baseUsername}-${Date.now().toString().slice(-5)}`;
+
+    await addUser({
       name: newUserName.trim(),
-      username: newUserUsername.trim(),
+      username,
       role: newUserRole,
       pin: newUserPin || '1234'
     });
+
     setIsAddUserOpen(false);
     setNewUserName('');
-    setNewUserUsername('');
     setNewUserPin('1234');
   };
 
@@ -330,7 +340,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div>
                       <span className="font-bold text-slate-200 block">{u.name}</span>
                       <span className="text-[10px] text-slate-500 font-mono">
-                        @{u.username} • PIN: ****
+                        Akun cloud • PIN: ****
                       </span>
                     </div>
                   </div>
@@ -402,19 +412,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Username Login
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="gilang123"
-                  value={newUserUsername}
-                  onChange={e => setNewUserUsername(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white focus:outline-none focus:border-red-500"
-                />
-              </div>
+              <p className="text-[10px] text-slate-500 bg-slate-950/50 border border-slate-800 rounded-xl px-3 py-2">
+                Username login dibuat otomatis oleh sistem. Pengguna cukup memilih nama akun dan memasukkan PIN.
+              </p>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
