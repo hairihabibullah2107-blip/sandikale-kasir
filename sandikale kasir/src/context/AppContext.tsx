@@ -1121,6 +1121,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (newLogs.length > 0) {
           setStockLogs(prev => [...newLogs, ...prev]);
+          void syncStockLogsToCloud(newLogs);
         }
 
         return updated;
@@ -1188,6 +1189,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (newLogs.length > 0) {
           setStockLogs(prev => [...newLogs, ...prev]);
+          void syncStockLogsToCloud(newLogs);
         }
 
         return updated;
@@ -1274,6 +1276,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteProduct = (id: string) => {
     const prod = products.find(p => p.id === id);
     setProducts(prev => prev.filter(p => p.id !== id));
+    if (cloudReady) {
+      void supabase.from('products').delete().eq('id', id).eq('store_id', STORE_ID);
+    }
     showToast(`Produk "${prod?.name || id}" dihapus`, 'info');
   };
 
