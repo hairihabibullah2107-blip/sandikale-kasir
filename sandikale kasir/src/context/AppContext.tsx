@@ -315,7 +315,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     cashier_id:
       (order.cashierId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(order.cashierId))
         ? order.cashierId
-        : (currentUser?.id || null),
+        : null,
     is_offline_sync: Boolean(order.isOfflineSync),
     tamper_checksum: order.tamperChecksum || null,
     encrypted_data_hash: order.encryptedDataHash || null,
