@@ -1,14 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabase';
 import { SandikaleLogo } from './SandikaleLogo';
 import { Lock, LogIn, AlertCircle } from 'lucide-react';
-
-const AUTH_EMAILS: Record<string, string> = {
-  admin: 'admin@sandikale.com',
-  kasir: 'kasir@sandikale.com',
-  produksi: 'produksi@sandikale.com',
-};
 
 export const LoginScreen: React.FC = () => {
   const { users, setCurrentUser, showToast } = useApp();
@@ -20,6 +14,12 @@ export const LoginScreen: React.FC = () => {
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!users.some(u => u.id === selectedUserId)) {
+      setSelectedUserId(users[0]?.id || '');
+    }
+  }, [users, selectedUserId]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,12 +34,9 @@ export const LoginScreen: React.FC = () => {
     setIsLoading(true);
 
     const signIn = async () => {
-      const email = AUTH_EMAILS[targetUser.username] || targetUser.email;
-      if (!email) {
-        setErrorMsg('Email akun cloud untuk pengguna ini belum dikonfigurasi.');
-        setIsLoading(false);
-        return;
-      }
+      const email = targetUser.username.includes('@')
+        ? targetUser.username
+        : `${targetUser.username}@sandikale.com`;
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -55,14 +52,14 @@ export const LoginScreen: React.FC = () => {
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, username, name, role')
+        .select('id, username, name, role, is_active')
         .eq('id', data.user.id)
         .single();
 
-      if (profileError || !profile) {
+      if (profileError || !profile || profile.is_active === false) {
         console.error('[SANDIKALE] Profile load failed:', profileError);
         await supabase.auth.signOut();
-        setErrorMsg('Profil pengguna belum tersedia di database cloud.');
+        setErrorMsg('Akun pengguna tidak aktif atau profil cloud belum tersedia.');
         setIsLoading(false);
         return;
       }
