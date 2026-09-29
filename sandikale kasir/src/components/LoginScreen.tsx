@@ -35,8 +35,8 @@ export const LoginScreen: React.FC = () => {
 
     const signIn = async () => {
       const email = targetUser.username.includes('@')
-        ? targetUser.username
-        : `${targetUser.username}@sandikale.com`;
+        ? targetUser.username.trim().toLowerCase()
+        : `${targetUser.username.trim().toLowerCase()}@sandikale.com`;
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
