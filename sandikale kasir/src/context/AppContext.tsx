@@ -96,13 +96,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const saved = localStorage.getItem(STORAGE_KEYS.USERS);
     if (saved) {
       try {
-        const parsed: User[] = JSON.parse(saved);
-        return parsed.map(u => {
-          if (u.username === 'admin' || u.role === 'admin') {
-            return { ...u, name: 'HAIRI (owner )', pin: 'hairi21' };
-          }
-          return u;
-        });
+        return JSON.parse(saved);
       } catch {
         return INITIAL_USERS;
       }
