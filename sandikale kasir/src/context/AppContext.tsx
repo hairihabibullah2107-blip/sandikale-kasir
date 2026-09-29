@@ -20,8 +20,7 @@ import {
 import { bluetoothPrinter, BluetoothDeviceState } from '../utils/bluetoothPrinter';
 import { generateSha256Checksum, encryptSensitiveData } from '../utils/crypto';
 import { getTranslation } from '../utils/i18n';
-import { createClient } from '@supabase/supabase-js';
-import { supabase, supabaseUrl, supabasePublishableKey } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 interface AppContextType {
   currentUser: User | null;
@@ -1320,48 +1319,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const username = userData.username.trim().toLowerCase();
-    const email = username.includes('@') ? username : `${username}@sandikale.com`;
-    const isolatedAuthClient = createClient(supabaseUrl, supabasePublishableKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-        detectSessionInUrl: false
-      }
-    });
-
-    const { data, error } = await isolatedAuthClient.auth.signUp({
-      email,
-      password: userData.pin || '1234',
-      options: {
-        data: {
-          full_name: userData.name,
-          username,
-          role: userData.role,
-          store_id: STORE_ID
-        }
-      }
-    });
-
-    if (error) {
-      showToast(`Gagal membuat pengguna: ${error.message}`, 'error');
+    if (!username || !userData.name.trim()) {
+      showToast('Nama dan username internal wajib diisi.', 'error');
       return;
     }
 
-    if (!data.user) {
-      showToast('Akun tidak berhasil dibuat.', 'error');
+    const { data, error } = await supabase.functions.invoke('manage-users', {
+      body: {
+        action: 'upsert_user',
+        name: userData.name.trim(),
+        username,
+        role: userData.role,
+        password: userData.pin || '1234'
+      }
+    });
+
+    if (error || !data?.success) {
+      console.error('[SANDIKALE] User cloud management failed:', error, data);
+      showToast(
+        `Gagal membuat/memperbarui pengguna: ${data?.error || error?.message || 'Kesalahan cloud'}`,
+        'error'
+      );
       return;
     }
 
-    // The database trigger creates the profile from the metadata above.
     await loadUsersFromCloud();
-
-    if (!data.session) {
-      showToast('Akun dibuat, tetapi konfirmasi email masih aktif di Supabase. Matikan "Confirm email" agar akun bisa langsung login dengan PIN.', 'info');
-    } else {
-      showToast(`Pengguna "${userData.name}" berhasil dibuat dan tersimpan di cloud.`, 'success');
-    }
-
-    await isolatedAuthClient.auth.signOut();
+    showToast(`Pengguna "${userData.name}" berhasil disinkronkan dengan akun cloud.`, 'success');
   };
 
   const deleteUser = async (id: string) => {
